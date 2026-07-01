@@ -1,11 +1,8 @@
 """
 Lakeflow Declarative Pipeline -- crypto medallion (Bronze -> Silver -> Gold).
 
-This runs INSIDE Databricks as a Lakeflow Declarative Pipeline (formerly
-Delta Live Tables / DLT). The classic `import dlt` API still works unchanged;
-on newer runtimes you may instead write `from pyspark import pipelines as dp`
-and use @dp.table / @dp.materialized_view. We keep `dlt` here for the widest
-compatibility with existing docs and examples.
+Runs INSIDE Databricks as a Lakeflow Declarative Pipeline (formerly Delta Live
+Tables / DLT). The classic `import dlt` API still works unchanged.
 
 Layers:
   bronze_ticks       streaming table, Auto Loader ingest of raw JSON
@@ -14,18 +11,16 @@ Layers:
   gold_daily_summary materialized view, per symbol/day OHLC + volume + volatility
   gold_moving_avgs   materialized view, moving averages over the 1-min candles
 
-The landing path is supplied via pipeline configuration key `landing_path`
-(set in databricks.yml). Point it at the Volume folder your producer writes to.
+Source data is the raw Binance @trade payload (short keys s/p/q/T/t/m),
+uploaded to the landing Volume. LANDING_PATH points at that Volume folder.
 """
 import dlt
 from pyspark.sql import functions as F
 from pyspark.sql import Window
 
-# Landing folder that the replay producer fills with JSON files.
-LANDING_PATH = spark.conf.get("landing_path", "/Volumes/workspace/crypto/landing")
+LANDING_PATH = "/Volumes/workspace/crypto/landing"
 
 
-# ---------------------------------------------------------------- Bronze
 @dlt.table(
     name="bronze_ticks",
     comment="Raw crypto trade ticks ingested from the landing volume via Auto Loader.",
@@ -42,7 +37,6 @@ def bronze_ticks():
     )
 
 
-# ---------------------------------------------------------------- Silver (trades)
 @dlt.table(
     name="silver_trades",
     comment="Cleaned, typed trade ticks with a proper event timestamp.",
@@ -55,18 +49,17 @@ def silver_trades():
     return (
         dlt.read_stream("bronze_ticks")
         .select(
-            F.col("symbol").cast("string").alias("symbol"),
-            F.col("trade_id").cast("long").alias("trade_id"),
-            F.col("price").cast("double").alias("price"),
-            F.col("quantity").cast("double").alias("quantity"),
-            F.expr("timestamp_millis(trade_time)").alias("trade_ts"),
-            F.col("is_buyer_maker").cast("boolean").alias("is_buyer_maker"),
+            F.col("s").cast("string").alias("symbol"),
+            F.col("t").cast("long").alias("trade_id"),
+            F.col("p").cast("double").alias("price"),
+            F.col("q").cast("double").alias("quantity"),
+            F.expr("timestamp_millis(T)").alias("trade_ts"),
+            F.col("m").cast("boolean").alias("is_buyer_maker"),
         )
         .withColumn("notional", F.col("price") * F.col("quantity"))
     )
 
 
-# ---------------------------------------------------------------- Silver (candles)
 @dlt.table(
     name="silver_ohlc_1m",
     comment="1-minute OHLC candles per symbol built from silver_trades.",
@@ -97,7 +90,6 @@ def silver_ohlc_1m():
     )
 
 
-# ---------------------------------------------------------------- Gold (daily)
 @dlt.table(
     name="gold_daily_summary",
     comment="Per symbol per day: OHLC, volume, VWAP and intraday volatility.",
@@ -125,7 +117,6 @@ def gold_daily_summary():
     )
 
 
-# ---------------------------------------------------------------- Gold (moving avgs)
 @dlt.table(
     name="gold_moving_avgs",
     comment="Moving averages and range over 1-minute candles (per symbol).",
