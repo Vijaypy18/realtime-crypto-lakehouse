@@ -1,0 +1,60 @@
+# Databricks Asset Bundle -- infrastructure-as-code for this project.
+# Deploy with the Databricks CLI:
+#   databricks bundle validate
+#   databricks bundle deploy -t dev
+#   databricks bundle run crypto_pipeline_job -t dev
+#
+# Docs: https://docs.databricks.com/aws/en/dev-tools/bundles/
+
+bundle:
+  name: crypto-lakehouse
+  databricks_cli_version: ">= 0.218.0"
+
+# ---- Adjust these three to match your workspace ------------------------------
+variables:
+  catalog:
+    description: Unity Catalog to write into (Free Edition default is often "workspace")
+    default: workspace
+  schema:
+    description: Target schema/database
+    default: crypto
+  landing_path:
+    description: Volume folder Auto Loader watches for new tick files
+    default: /Volumes/workspace/crypto/landing
+# ------------------------------------------------------------------------------
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      # Replace with your Free Edition workspace URL, e.g.
+      # https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
+      host: https://CHANGE-ME.cloud.databricks.com
+
+resources:
+  pipelines:
+    crypto_medallion:
+      name: crypto_medallion_pipeline
+      serverless: true
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      libraries:
+        - file:
+            path: pipelines/crypto_medallion.py
+      configuration:
+        landing_path: ${var.landing_path}
+
+  jobs:
+    crypto_pipeline_job:
+      name: crypto_pipeline_job
+      tasks:
+        - task_key: run_medallion
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.crypto_medallion.id}
+      # Runs the medallion refresh every hour. Remove the schedule to run
+      # manually (recommended on Free Edition to conserve quota).
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED

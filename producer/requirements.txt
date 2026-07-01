@@ -1,0 +1,3 @@
+# Only needed for the OPTIONAL live-capture script (capture_live.py).
+# The sample generator and replay producer use the standard library only.
+websocket-client>=1.7.0
